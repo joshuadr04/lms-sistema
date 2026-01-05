@@ -3,10 +3,10 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 
-# --- 1. CONFIGURAÇÃO VISUAL (Modo Embed/Camaleão) ---
+# --- 1. CONFIGURAÇÃO VISUAL ---
 st.set_page_config(layout="wide")
 
-# CSS Hack para esconder menus e rodapé (Visual limpo para o Notion)
+# CSS Hack para esconder menus e rodapé
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -21,17 +21,21 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. CONEXÃO HÍBRIDA (Funciona no PC e na Nuvem) ---
+# --- 🚨 ÁREA DE DEBUG (O DETETIVE) 🚨 ---
+# Isso vai mostrar na tela o que o Streamlit está lendo do link.
+# Se aparecer {}, significa que o link chegou vazio.
+st.warning(f"🔍 DEBUG: O App recebeu estes parâmetros: {dict(st.query_params)}")
+# ----------------------------------------
+
+# --- 2. CONEXÃO HÍBRIDA ---
 def conectar_banco():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
-    # Tenta conectar via Segredo da Nuvem (Streamlit Cloud)
     if "gcp_service_account" in st.secrets:
         creds = Credentials.from_service_account_info(
             st.secrets["gcp_service_account"],
             scopes=scopes
         )
-    # Se falhar, tenta conectar via Arquivo Local (Seu PC)
     else:
         creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
         
@@ -39,7 +43,6 @@ def conectar_banco():
     return client.open("LMS_Database")
 
 def carregar_questoes():
-    # Cache simples para performance
     if 'db_questoes' not in st.session_state:
         sheet = conectar_banco()
         worksheet = sheet.worksheet("DB_QUESTOES")
@@ -47,28 +50,27 @@ def carregar_questoes():
         st.session_state['db_questoes'] = pd.DataFrame(dados)
     return st.session_state['db_questoes']
 
-# --- 3. LÓGICA INTELIGENTE (Lê a URL) ---
-# Pega o parâmetro ?materia=Python da URL
+# --- 3. LÓGICA INTELIGENTE ---
 params = st.query_params
 materia_alvo = params.get("materia", None)
 
 if not materia_alvo:
-    # Tela de Boas-vindas (Caso abra o link direto sem parametros)
-    st.title("🧩 Central de Exercícios")
-    st.info("Este widget está pronto para ser conectado ao Notion.")
-    st.markdown("Use o link no formato: `seu-app.streamlit.app/?materia=NomeDaMateria`")
+    # Tela de Boas-vindas (Link vazio)
+    st.info("O sistema não detectou nenhuma matéria no link.")
+    st.write("Link esperado: `seu-app.app/?materia=python1`")
 
 else:
-    # Tela de Questões (Quando vem do Notion)
+    # Tela de Questões
     try:
         st.subheader(f"📝 Pratique: {materia_alvo}")
         df_questoes = carregar_questoes()
         
-        # Filtra a matéria
-        questoes_filtradas = df_questoes[df_questoes['materia'] == materia_alvo]
+        # Filtra a matéria (converte tudo para string para evitar erro)
+        questoes_filtradas = df_questoes[df_questoes['materia'].astype(str) == str(materia_alvo)]
         
         if len(questoes_filtradas) == 0:
-            st.warning(f"Nenhuma questão encontrada para '{materia_alvo}'.")
+            st.warning(f"Nenhuma questão encontrada para o código '{materia_alvo}'. Verifique a planilha.")
+            st.write("Matérias disponíveis na planilha:", df_questoes['materia'].unique())
         
         for index, row in questoes_filtradas.iterrows():
             with st.container(border=True):
@@ -92,4 +94,4 @@ else:
                             st.error(f"❌ Errado. Gabarito: {str(row['gabarito']).upper()}")
                             st.caption(f"💡 {row['comentario']}")
     except Exception as e:
-        st.error(f"Erro de conexão: {e}")
+        st.error(f"Erro técnico: {e}")
