@@ -5,8 +5,6 @@ from google.oauth2.service_account import Credentials
 
 # --- 1. CONFIGURAÇÃO VISUAL ---
 st.set_page_config(layout="wide")
-
-# CSS para limpar o visual
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -21,26 +19,13 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# ==========================================
-# 🚨 ÁREA DE DEBUG (CÂMERA DE SEGURANÇA) 🚨
-# ==========================================
-# Transforma os parâmetros em texto para a gente ler
-params_recebidos = dict(st.query_params)
-st.warning(f"🔍 DEBUG (O que chegou): {params_recebidos}")
-# ==========================================
-
-# --- 2. CONEXÃO HÍBRIDA ---
+# --- 2. CONEXÃO E CARREGAMENTO ---
 def conectar_banco():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    
     if "gcp_service_account" in st.secrets:
-        creds = Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"],
-            scopes=scopes
-        )
+        creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     else:
         creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
-        
     client = gspread.authorize(creds)
     return client.open("LMS_Database")
 
@@ -52,27 +37,34 @@ def carregar_questoes():
         st.session_state['db_questoes'] = pd.DataFrame(dados)
     return st.session_state['db_questoes']
 
-# --- 3. LÓGICA DO APP ---
-# Tenta pegar a 'materia' do link
-materia_alvo = st.query_params.get("materia", None)
+# --- 3. LÓGICA BLINDADA (FAIL-SAFE) ---
+try:
+    df_questoes = carregar_questoes()
+    lista_materias = df_questoes['materia'].unique()
+    
+    # Tenta pegar a matéria pelo Link (Plano A)
+    param_materia = st.query_params.get("materia", None)
+    
+    materia_selecionada = None
 
-if not materia_alvo:
-    # Cenário 1: Link chegou vazio
-    st.info("O sistema não encontrou o código da matéria no link.")
-    st.write("Link que o App esperava receber: `...?materia=python1`")
+    if param_materia:
+        # Se veio pelo link, usa direto
+        materia_selecionada = param_materia
+    else:
+        # PLANO B: Se o link falhou (Notion), mostra o menu!
+        st.info("👋 Selecione o módulo abaixo para começar:")
+        # Cria um dropdown para o aluno escolher
+        materia_selecionada = st.selectbox("Escolha a Matéria:", lista_materias, index=None, placeholder="Clique para selecionar...")
 
-else:
-    # Cenário 2: Link chegou com algo
-    try:
-        st.subheader(f"📝 Pratique: {materia_alvo}")
-        df_questoes = carregar_questoes()
+    # --- 4. EXIBIÇÃO DAS QUESTÕES ---
+    if materia_selecionada:
+        st.subheader(f"📝 Pratique: {materia_selecionada}")
         
-        # Converte para texto para garantir que compare texto com texto
-        questoes_filtradas = df_questoes[df_questoes['materia'].astype(str) == str(materia_alvo)]
+        # Filtro robusto (converte para string)
+        questoes_filtradas = df_questoes[df_questoes['materia'].astype(str) == str(materia_selecionada)]
         
         if len(questoes_filtradas) == 0:
-            st.error(f"❌ Matéria '{materia_alvo}' não encontrada na planilha.")
-            st.write("Matérias disponíveis no banco:", df_questoes['materia'].unique())
+            st.warning(f"Não há questões cadastradas para: {materia_selecionada}")
         
         for index, row in questoes_filtradas.iterrows():
             with st.container(border=True):
@@ -85,9 +77,10 @@ else:
                     f"D) {row['alternativa_d']}": 'd'
                 }
                 
-                resposta = st.radio("Alternativa:", list(opcoes.keys()), key=f"q_{row['id']}", index=None, label_visibility="collapsed")
+                key_unica = f"q_{row['id']}"
+                resposta = st.radio("Alternativa:", list(opcoes.keys()), key=key_unica, index=None, label_visibility="collapsed")
                 
-                if st.button(f"Verificar", key=f"btn_{row['id']}"):
+                if st.button("Verificar", key=f"btn_{row['id']}"):
                     if resposta:
                         letra = opcoes[resposta]
                         if letra.lower() == str(row['gabarito']).lower():
@@ -95,5 +88,6 @@ else:
                         else:
                             st.error(f"❌ Errado. Gabarito: {str(row['gabarito']).upper()}")
                             st.caption(f"💡 {row['comentario']}")
-    except Exception as e:
-        st.error(f"Erro técnico: {e}")
+
+except Exception as e:
+    st.error(f"Erro de conexão: {e}")
