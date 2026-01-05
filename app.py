@@ -6,7 +6,7 @@ from google.oauth2.service_account import Credentials
 # --- 1. CONFIGURAÇÃO VISUAL ---
 st.set_page_config(layout="wide")
 
-# CSS Hack para esconder menus e rodapé
+# CSS para limpar o visual
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -21,11 +21,13 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 🚨 ÁREA DE DEBUG (O DETETIVE) 🚨 ---
-# Isso vai mostrar na tela o que o Streamlit está lendo do link.
-# Se aparecer {}, significa que o link chegou vazio.
-st.warning(f"🔍 DEBUG: O App recebeu estes parâmetros: {dict(st.query_params)}")
-# ----------------------------------------
+# ==========================================
+# 🚨 ÁREA DE DEBUG (CÂMERA DE SEGURANÇA) 🚨
+# ==========================================
+# Transforma os parâmetros em texto para a gente ler
+params_recebidos = dict(st.query_params)
+st.warning(f"🔍 DEBUG (O que chegou): {params_recebidos}")
+# ==========================================
 
 # --- 2. CONEXÃO HÍBRIDA ---
 def conectar_banco():
@@ -50,27 +52,27 @@ def carregar_questoes():
         st.session_state['db_questoes'] = pd.DataFrame(dados)
     return st.session_state['db_questoes']
 
-# --- 3. LÓGICA INTELIGENTE ---
-params = st.query_params
-materia_alvo = params.get("materia", None)
+# --- 3. LÓGICA DO APP ---
+# Tenta pegar a 'materia' do link
+materia_alvo = st.query_params.get("materia", None)
 
 if not materia_alvo:
-    # Tela de Boas-vindas (Link vazio)
-    st.info("O sistema não detectou nenhuma matéria no link.")
-    st.write("Link esperado: `seu-app.app/?materia=python1`")
+    # Cenário 1: Link chegou vazio
+    st.info("O sistema não encontrou o código da matéria no link.")
+    st.write("Link que o App esperava receber: `...?materia=python1`")
 
 else:
-    # Tela de Questões
+    # Cenário 2: Link chegou com algo
     try:
         st.subheader(f"📝 Pratique: {materia_alvo}")
         df_questoes = carregar_questoes()
         
-        # Filtra a matéria (converte tudo para string para evitar erro)
+        # Converte para texto para garantir que compare texto com texto
         questoes_filtradas = df_questoes[df_questoes['materia'].astype(str) == str(materia_alvo)]
         
         if len(questoes_filtradas) == 0:
-            st.warning(f"Nenhuma questão encontrada para o código '{materia_alvo}'. Verifique a planilha.")
-            st.write("Matérias disponíveis na planilha:", df_questoes['materia'].unique())
+            st.error(f"❌ Matéria '{materia_alvo}' não encontrada na planilha.")
+            st.write("Matérias disponíveis no banco:", df_questoes['materia'].unique())
         
         for index, row in questoes_filtradas.iterrows():
             with st.container(border=True):
