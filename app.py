@@ -10,7 +10,8 @@ st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden;}
+    /* header {visibility: hidden;} <--- COMENTADO PARA O MENU LATERAL VOLTAR A APARECER */
+    
     .block-container {padding-top: 1rem; padding-bottom: 2rem;}
     .login-box {
         padding: 20px;
@@ -22,7 +23,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. CONEXÃO GOOGLE SHEETS (LEITURA E ESCRITA) ---
+# --- 2. CONEXÃO GOOGLE SHEETS ---
 def conectar_banco():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
@@ -34,7 +35,6 @@ def conectar_banco():
     client = gspread.authorize(creds)
     return client.open("LMS_Database")
 
-# Cache apenas para leitura pesada (Questões), Alunos precisamos ler sempre atualizado
 @st.cache_data(ttl=60)
 def carregar_questoes():
     try:
@@ -44,7 +44,6 @@ def carregar_questoes():
         return pd.DataFrame()
 
 def carregar_alunos_live():
-    # Não usa cache para garantir que a preferência de senha esteja atualizada
     try:
         sheet = conectar_banco()
         ws = sheet.worksheet("DB_ALUNOS")
@@ -53,23 +52,17 @@ def carregar_alunos_live():
         return pd.DataFrame(), None
 
 def atualizar_preferencia_senha(matricula, ativar_protecao):
-    """Escreve TRUE ou FALSE na coluna login_protegido"""
     try:
         sheet = conectar_banco()
         ws = sheet.worksheet("DB_ALUNOS")
-        
-        # Encontra a linha do aluno pela matrícula
         cell = ws.find(str(matricula))
-        
-        # Assume que 'login_protegido' é a 4ª coluna (D)
-        # Se sua planilha for diferente, ajuste o col=4
+        # Ajuste a coluna se necessário (4 = coluna D 'login_protegido')
         valor_para_salvar = "TRUE" if ativar_protecao else "FALSE"
         ws.update_cell(cell.row, 4, valor_para_salvar)
-        
-        st.toast(f"Preferência salva: Login com Senha = {valor_para_salvar}")
+        st.toast(f"Preferência salva: {valor_para_salvar}")
         return True
     except Exception as e:
-        st.error(f"Erro ao salvar preferência: {e}")
+        st.error(f"Erro ao salvar: {e}")
         return False
 
 # --- 3. CONTROLE DE SESSÃO ---
@@ -77,76 +70,67 @@ if 'usuario_ativo' not in st.session_state:
     st.session_state['usuario_ativo'] = None
 
 # ==================================================
-# 🔐 TELA DE LOGIN (NOVA LÓGICA)
+# 🔐 TELA DE LOGIN (UNIFICADA E LIMPA)
 # ==================================================
 if not st.session_state['usuario_ativo']:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("<div class='login-box'><h2>🎓 Portal do Aluno</h2></div>", unsafe_allow_html=True)
         
-        matricula_input = st.text_input("Digite sua Matrícula:", placeholder="Ex: 202401")
-        
-        if 'pedir_senha' not in st.session_state:
-            st.session_state['pedir_senha'] = False
-
-        if st.button("Entrar", use_container_width=True):
-            df_alunos, ws_alunos = carregar_alunos_live()
+        # Formulário Único
+        with st.form("login_form"):
+            matricula_input = st.text_input("Matrícula:", placeholder="Ex: 202401")
+            senha_input = st.text_input("Senha:", type="password", placeholder="(Opcional se seu login for livre)")
             
-            if df_alunos.empty:
-                # Modo Teste
-                st.session_state['usuario_ativo'] = matricula_input
-                st.session_state['nome_aluno'] = "Aluno Teste"
-                st.rerun()
-
-            aluno = df_alunos[df_alunos['matricula'].astype(str) == str(matricula_input)]
+            # Botão Único
+            submitted = st.form_submit_button("Entrar", use_container_width=True)
             
-            if not aluno.empty:
-                dados = aluno.iloc[0]
-                senha_real = str(dados.get('senha', '')).strip()
-                protegido = str(dados.get('login_protegido', 'FALSE')).upper()
+            if submitted:
+                df_alunos, _ = carregar_alunos_live()
                 
-                # Regra: Só pede senha se estiver marcado TRUE na planilha
-                if protegido == "TRUE":
-                    st.session_state['pedir_senha'] = True
-                    st.session_state['temp_matricula'] = matricula_input
-                    st.session_state['temp_nome'] = dados['nome']
-                    st.session_state['temp_senha_real'] = senha_real
-                    st.rerun()
-                else:
-                    # Entra Direto
+                # Modo Teste (Sem planilha)
+                if df_alunos.empty:
                     st.session_state['usuario_ativo'] = matricula_input
-                    st.session_state['nome_aluno'] = dados['nome']
-                    st.session_state['login_protegido'] = False # Guarda estado atual
-                    st.success(f"Bem-vindo(a), {dados['nome']}!")
+                    st.session_state['nome_aluno'] = "Aluno Teste"
                     st.rerun()
-            else:
-                st.error("Matrícula não encontrada.")
 
-        if st.session_state['pedir_senha']:
-            st.info(f"Olá, {st.session_state['temp_nome']}. Insira sua senha.")
-            senha_input = st.text_input("Senha:", type="password")
-            if st.button("Confirmar", type="primary"):
-                if str(senha_input) == str(st.session_state['temp_senha_real']):
-                    st.session_state['usuario_ativo'] = st.session_state['temp_matricula']
-                    st.session_state['nome_aluno'] = st.session_state['temp_nome']
-                    st.session_state['login_protegido'] = True
-                    del st.session_state['pedir_senha']
-                    st.rerun()
+                # Busca Aluno
+                aluno = df_alunos[df_alunos['matricula'].astype(str) == str(matricula_input)]
+                
+                if not aluno.empty:
+                    dados = aluno.iloc[0]
+                    protegido = str(dados.get('login_protegido', 'FALSE')).upper() == 'TRUE'
+                    senha_real = str(dados.get('senha', '')).strip()
+                    
+                    # LÓGICA DE VALIDAÇÃO
+                    if protegido:
+                        # Se for protegido, OBRIGA a senha estar certa
+                        if str(senha_input) == senha_real:
+                            st.session_state['usuario_ativo'] = matricula_input
+                            st.session_state['nome_aluno'] = dados['nome']
+                            st.success("Login autorizado!")
+                            st.rerun()
+                        else:
+                            st.error("🔒 Este perfil é protegido. Senha incorreta.")
+                    else:
+                        # Se NÃO for protegido, ignora o campo de senha e entra
+                        st.session_state['usuario_ativo'] = matricula_input
+                        st.session_state['nome_aluno'] = dados['nome']
+                        st.rerun()
                 else:
-                    st.error("Senha incorreta.")
+                    st.error("❌ Matrícula não encontrada.")
 
 # ==================================================
 # 🚀 ÁREA LOGADA
 # ==================================================
 else:
-    # --- BARRA LATERAL (PERFIL E OPÇÕES) ---
+    # --- BARRA LATERAL ---
     with st.sidebar:
         st.title(f"👤 {st.session_state.get('nome_aluno', 'Aluno')}")
         
-        # --- NOVO: CONFIGURAÇÃO DE SEGURANÇA ---
-        with st.expander("⚙️ Configurações"):
+        # Configuração de Segurança
+        with st.expander("⚙️ Segurança"):
             df_alunos, _ = carregar_alunos_live()
-            # Busca estado atual do aluno no banco para mostrar o checkbox correto
             try:
                 dados_atuais = df_alunos[df_alunos['matricula'].astype(str) == str(st.session_state['usuario_ativo'])].iloc[0]
                 estado_atual = str(dados_atuais.get('login_protegido', 'FALSE')).upper() == 'TRUE'
@@ -154,12 +138,9 @@ else:
                 estado_atual = False
             
             novo_estado = st.toggle("Exigir Senha no Login", value=estado_atual)
-            
-            # Se mudou, salva no banco
             if novo_estado != estado_atual:
-                sucesso = atualizar_preferencia_senha(st.session_state['usuario_ativo'], novo_estado)
-                if sucesso:
-                    st.rerun() # Recarrega para confirmar visualmente
+                atualizar_preferencia_senha(st.session_state['usuario_ativo'], novo_estado)
+                st.rerun()
         
         st.divider()
         modo_estudo = st.sidebar.radio("Menu:", ["🎯 Banco de Questões", "📄 Provas Antigas"])
@@ -168,19 +149,17 @@ else:
             st.session_state['usuario_ativo'] = None
             st.rerun()
 
-    # --- CORPO DO APP (BANCO E PROVAS) ---
+    # --- CORPO DO APP ---
     df_questoes = carregar_questoes()
     
     if df_questoes.empty:
         st.error("Erro ao carregar banco de questões.")
     else:
         if "Banco" in modo_estudo:
-            # --- MODO BANCO (FILTROS) ---
             st.header("🎯 Banco Geral")
             col_f1, col_f2 = st.columns(2)
             with col_f1:
                 logica = st.radio("Filtro:", ["Rigoroso (E)", "Flexível (OU)"], horizontal=True)
-            
             operador = "and" if "Rigoroso" in logica else "or"
             
             opt_materia = sorted(df_questoes['materia'].unique()) if 'materia' in df_questoes.columns else []
@@ -196,16 +175,13 @@ else:
             df_filtrado = df_questoes.copy()
             if queries:
                 query_final = f" {operador} ".join(queries)
-                try:
-                    df_filtrado = df_questoes.query(query_final)
+                try: df_filtrado = df_questoes.query(query_final)
                 except: pass
-            elif operador == "or" and (sel_materia or sel_dif):
-                 pass # Mantém vazio se OU sem match
+            elif operador == "or" and (sel_materia or sel_dif): pass
 
             st.caption(f"Encontradas: {len(df_filtrado)}")
             
         else:
-            # --- MODO PROVA ---
             st.header("📄 Provas Antigas")
             opt_ano = sorted(df_questoes['ano'].astype(str).unique()) if 'ano' in df_questoes.columns else []
             prova_selecionada = st.selectbox("Selecione a Edição:", opt_ano, index=None)
@@ -217,7 +193,6 @@ else:
             else:
                 df_filtrado = pd.DataFrame()
 
-        # --- EXIBIÇÃO ---
         for index, row in df_filtrado.iterrows():
             with st.container(border=True):
                 st.markdown(f"**{row['enunciado']}**")
