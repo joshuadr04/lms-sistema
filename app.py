@@ -8,22 +8,11 @@ st.set_page_config(layout="wide", page_title="LMS - Sistema Escolar")
 
 st.markdown("""
     <style>
-    /* Esconde o menu de 3 pontinhos do canto direito */
     #MainMenu {visibility: hidden;}
-    
-    /* Esconde o rodapé padrão "Made with Streamlit" de dentro do app */
     footer {visibility: hidden;}
+    /* header {visibility: hidden;} <--- COMENTADO PARA O MENU LATERAL VOLTAR A APARECER */
     
-    /* Esconde o botão de "Deploy" que às vezes aparece para o dono */
-    .stDeployButton {display:none;}
-    
-    /* O cabeçalho precisa ficar visível para o botão do Menu Lateral aparecer */
-    /* header {visibility: hidden;} */
-    
-    /* Ajustes de espaçamento */
     .block-container {padding-top: 1rem; padding-bottom: 2rem;}
-    
-    /* Estilo do Box de Login */
     .login-box {
         padding: 20px;
         border-radius: 10px;
@@ -81,7 +70,7 @@ if 'usuario_ativo' not in st.session_state:
     st.session_state['usuario_ativo'] = None
 
 # ==================================================
-# 🔐 TELA DE LOGIN (UNIFICADA)
+# 🔐 TELA DE LOGIN (UNIFICADA E LIMPA)
 # ==================================================
 if not st.session_state['usuario_ativo']:
     col1, col2, col3 = st.columns([1, 2, 1])
