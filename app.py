@@ -161,7 +161,7 @@ def corrigir_com_ia(pergunta, gabarito, resposta_aluno, modo_escolhido):
 
     # 3. Monta o Pacote para enviar
     modelo = genai.GenerativeModel(
-        model_name='models/gemini-1.5-flash', # O modelo rápido que achamos
+        model_name='models/gemini-flash-latest', # O modelo rápido que achamos
         system_instruction=instrucao_sistema
     )
     
@@ -519,6 +519,7 @@ with st.sidebar.expander("Abrir Simulador"):
     if c3.button("🤔 Socrático"):
         res = corrigir_com_ia(t_pergunta, t_gabarito, t_aluno, "Socrático")
         st.warning(res)
+
 
 
 
