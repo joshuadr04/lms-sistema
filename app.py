@@ -493,38 +493,32 @@ else:
 # Espaço Fantasma para o Rodapé não tampar nada
 st.markdown("<div style='height: 100px;'></div>", unsafe_allow_html=True)
 
-# ==================================================
-# 🧪 ZONA DE TESTE DO GEMINI (DIAGNÓSTICO)
-# ==================================================
-import google.generativeai as genai
 
+
+# ==================================================
+# 🧪 ZONA DE TESTE DE CORREÇÃO (Pode apagar depois)
+# ==================================================
 st.sidebar.markdown("---")
-st.sidebar.subheader("🤖 Diagnóstico IA")
+st.sidebar.subheader("📝 Simulador de Correção IA")
 
-if st.sidebar.button("Listar Modelos Disponíveis"):
-    with st.sidebar.status("Consultando Google..."):
-        try:
-            if "gemini" in st.secrets:
-                genai.configure(api_key=st.secrets["gemini"]["api_key"])
-                
-                # Pergunta ao Google quais modelos essa chave pode acessar
-                modelos = genai.list_models()
-                nomes_disponiveis = []
-                for m in modelos:
-                    if 'generateContent' in m.supported_generation_methods:
-                        nomes_disponiveis.append(m.name)
-                
-                if nomes_disponiveis:
-                    st.sidebar.success("✅ Conectado! Modelos encontrados:")
-                    # Mostra a lista pura para a gente copiar o nome certo
-                    st.sidebar.code("\n".join(nomes_disponiveis))
-                else:
-                    st.sidebar.warning("⚠️ Conectado, mas nenhum modelo de texto encontrado.")
-            else:
-                st.sidebar.error("❌ Chave não encontrada.")
-                
-        except Exception as e:
-            st.sidebar.error(f"Erro: {e}")
+with st.sidebar.expander("Abrir Simulador"):
+    t_pergunta = st.text_input("Pergunta Fictícia:", value="Explique a 3ª Lei de Newton.")
+    t_gabarito = st.text_input("Gabarito Esperado:", value="Ação e Reação. Forças de mesma intensidade, mesma direção e sentidos opostos, em corpos diferentes.")
+    t_aluno = st.text_area("Resposta do Aluno (Teste):", value="Toda ação tem uma reação igual.")
+
+    c1, c2, c3 = st.columns(3)
+    
+    if c1.button("👮 Banca"):
+        res = corrigir_com_ia(t_pergunta, t_gabarito, t_aluno, "Banca")
+        st.info(res)
+        
+    if c2.button("🧑‍🏫 Prof"):
+        res = corrigir_com_ia(t_pergunta, t_gabarito, t_aluno, "Professor")
+        st.success(res)
+        
+    if c3.button("🤔 Socrático"):
+        res = corrigir_com_ia(t_pergunta, t_gabarito, t_aluno, "Socrático")
+        st.warning(res)
 
 
 
