@@ -14,7 +14,11 @@ st.markdown("""
     footer {visibility: hidden;}
     .stDeployButton {display:none;}
     
-    .block-container {padding-top: 1rem; padding-bottom: 5rem;} /* Espaço extra embaixo */
+    /* CORREÇÃO DO CORTE NO TOPO: Aumentei para 3rem */
+    .block-container {
+        padding-top: 3rem; 
+        padding-bottom: 5rem;
+    } 
     
     .login-box {
         padding: 20px;
@@ -30,6 +34,7 @@ st.markdown("""
 # --- 2. CONEXÃO E BANCO DE DADOS ---
 def conectar_banco():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    # Tenta usar secrets (nuvem) ou arquivo local
     if "gcp_service_account" in st.secrets:
         creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     else:
