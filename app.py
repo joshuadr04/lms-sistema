@@ -108,6 +108,79 @@ def atualizar_preferencia_aluno(matricula, coluna_nome, novo_valor):
         st.error(f"Erro ao salvar preferência: {e}")
         return False
 
+import google.generativeai as genai
+
+# ==================================================
+# 🧠 CÉREBRO DA IA (GEMINI 2.0 FLASH)
+# ==================================================
+def corrigir_com_ia(pergunta, gabarito, resposta_aluno, modo_escolhido):
+    """
+    Envia a questão para o Google Gemini corrigir com a personalidade escolhida.
+    Modos: 'Banca', 'Professor', 'Socrático'
+    """
+    # 1. Configura a Chave (Pega do Cofre/Secrets)
+    if "gemini" in st.secrets:
+        genai.configure(api_key=st.secrets["gemini"]["api_key"])
+    else:
+        return "Erro: Chave da IA não configurada."
+
+    # 2. Define a PERSONALIDADE (System Instruction)
+    instrucao_sistema = ""
+    
+    if modo_escolhido == "Banca":
+        instrucao_sistema = """
+        Atue como um CORRETOR DE BANCA RIGOROSO (estilo ENEM/Fuvest).
+        Sua tarefa:
+        1. Atribuir uma NOTA de 0 a 100.
+        2. Dar um veredito: "Correto", "Parcial" ou "Incorreto".
+        3. Listar brevemente quais palavras-chave do gabarito faltaram.
+        Seja direto, frio e objetivo. Não dê dicas de estudo, apenas avalie.
+        """
+        
+    elif modo_escolhido == "Professor":
+        instrucao_sistema = """
+        Atue como um PROFESSOR PARTICULAR DIDÁTICO e paciente.
+        Sua tarefa:
+        1. Identificar o que o aluno acertou (reforço positivo).
+        2. Explicar onde ele errou e, principalmente, POR QUE errou (conceito).
+        3. Dar uma mini-explicação (2 frases) sobre o tema correto.
+        4. Se houver erro grave de português, corrija educadamente no final.
+        Use tom acolhedor e emojis.
+        """
+        
+    elif modo_escolhido == "Socrático":
+        instrucao_sistema = """
+        Atue como um MENTOR SOCRÁTICO.
+        REGRA DE OURO: NUNCA DÊ A RESPOSTA CORRETA DIRETAMENTE.
+        Sua tarefa:
+        1. Analisar o erro de raciocínio do aluno.
+        2. Devolver uma PERGUNTA ou um DESAFIO que faça o aluno perceber o próprio erro.
+        3. Dar uma pista indireta (analogia ou contexto).
+        Force o aluno a pensar. Se ele acertou, desafie-o com uma pergunta mais difícil sobre o mesmo tema.
+        """
+
+    # 3. Monta o Pacote para enviar
+    modelo = genai.GenerativeModel(
+        model_name='models/gemini-2.0-flash', # O modelo rápido que achamos
+        system_instruction=instrucao_sistema
+    )
+    
+    prompt_usuario = f"""
+    -- DADOS DA QUESTÃO --
+    PERGUNTA: {pergunta}
+    GABARITO ESPERADO / TÓPICOS: {gabarito}
+    
+    -- RESPOSTA DO ALUNO --
+    {resposta_aluno}
+    """
+
+    # 4. Chama o Google (Try/Except para evitar que o App quebre se a net cair)
+    try:
+        response = modelo.generate_content(prompt_usuario)
+        return response.text
+    except Exception as e:
+        return f"Desculpe, o cérebro da IA falhou agora. Erro: {str(e)}"
+
 # --- 3. CONTROLE DE SESSÃO ---
 if 'usuario_ativo' not in st.session_state:
     st.session_state['usuario_ativo'] = None
@@ -452,6 +525,7 @@ if st.sidebar.button("Listar Modelos Disponíveis"):
                 
         except Exception as e:
             st.sidebar.error(f"Erro: {e}")
+
 
 
 
