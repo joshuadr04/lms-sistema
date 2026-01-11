@@ -419,3 +419,37 @@ else:
 
 # Espaço Fantasma para o Rodapé não tampar nada
 st.markdown("<div style='height: 100px;'></div>", unsafe_allow_html=True)
+
+
+# ... (todo o seu código atual acima) ...
+
+# ==================================================
+# 🧪 ZONA DE TESTE DO GEMINI (Pode apagar depois)
+# ==================================================
+import google.generativeai as genai
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🤖 Teste de Conexão")
+
+if st.sidebar.button("Testar Cérebro da IA"):
+    with st.sidebar.status("Conectando ao Google..."):
+        try:
+            # 1. Configura a chave que você salvou nos Secrets
+            if "gemini" in st.secrets:
+                api_key = st.secrets["gemini"]["api_key"]
+                genai.configure(api_key=api_key)
+                
+                # 2. Carrega o modelo Flash (Rápido e Barato/Grátis)
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                
+                # 3. Faz uma pergunta simples
+                response = model.generate_content("Responda apenas: 'Conexão Estabelecida com Sucesso, [Seu Nome]!'")
+                
+                # 4. Mostra o resultado
+                st.sidebar.success(response.text)
+            else:
+                st.sidebar.error("❌ Chave [gemini] não encontrada nos Secrets.")
+                
+        except Exception as e:
+            st.sidebar.error(f"Erro técnico: {e}")
+
