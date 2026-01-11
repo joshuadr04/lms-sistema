@@ -440,7 +440,7 @@ if st.sidebar.button("Testar Cérebro da IA"):
                 genai.configure(api_key=api_key)
                 
                 # 2. Carrega o modelo Flash (Rápido e Barato/Grátis)
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                model = genai.GenerativeModel('gemini-pro')
                 
                 # 3. Faz uma pergunta simples
                 response = model.generate_content("Responda apenas: 'Conexão Estabelecida com Sucesso, [Seu Nome]!'")
@@ -452,4 +452,5 @@ if st.sidebar.button("Testar Cérebro da IA"):
                 
         except Exception as e:
             st.sidebar.error(f"Erro técnico: {e}")
+
 
