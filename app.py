@@ -32,16 +32,6 @@ st.markdown("""
         border: 1px solid #333;
     }
     
-    .big-button {
-        padding: 15px 30px;
-        font-size: 20px;
-        font-weight: bold;
-        width: 100%;
-        border-radius: 10px;
-        margin-top: 20px;
-        margin-bottom: 20px;
-    }
-    
     .resumo-box {
         background-color: #121212;
         padding: 20px;
@@ -65,7 +55,8 @@ def conectar_banco():
     client = gspread.authorize(creds)
     return client.open("LMS_Database")
 
-@st.cache_data(ttl=60)
+# ⚡ OTIMIZAÇÃO 1: AUMENTO DE CACHE (De 60s para 1 hora)
+@st.cache_data(ttl=3600)
 def carregar_questoes():
     try:
         sheet = conectar_banco()
@@ -92,10 +83,7 @@ def registrar_resposta(dados):
             ws = sheet.add_worksheet("DB_RESPOSTAS", 1000, 10)
             ws.append_row(["matricula", "id_questao", "acertou", "tempo", "confianca", "motivo_erro", "data_hora", "nota_percentual"])
         
-        # Tratamento de Tempo (Salva vazio se for None)
         tempo_valor = str(round(dados['tempo'], 2)) if dados['tempo'] is not None else ""
-        
-        # Tratamento de Nota (Garante inteiro)
         nota_valor = int(dados.get('nota_percentual', 0))
 
         ws.append_row([
@@ -125,13 +113,18 @@ def atualizar_preferencia_aluno(matricula, coluna_nome, novo_valor):
         return False
 
 # ==================================================
-# 3. CÉREBRO DA IA (GEMINI)
+# 3. CÉREBRO DA IA (GEMINI) - COM STREAMING ⚡
 # ==================================================
-def corrigir_com_ia(pergunta, gabarito, resposta_aluno, modo_escolhido):
+def corrigir_com_ia_stream(pergunta, gabarito, resposta_aluno, modo_escolhido, placeholder_saida):
+    """
+    Gera resposta via streaming escrevendo diretamente no placeholder_saida.
+    Retorna o texto completo e a nota extraída.
+    """
     if "gemini" in st.secrets:
         genai.configure(api_key=st.secrets["gemini"]["api_key"])
     else:
-        return "Erro: Chave [gemini] não configurada.", 0
+        placeholder_saida.error("Erro: Chave [gemini] não configurada.")
+        return "", 0
 
     base_instruction = """
     IMPORTANTE: No final da sua resposta, você DEVE incluir a nota percentual (0 a 100) da resposta do aluno.
@@ -154,22 +147,36 @@ def corrigir_com_ia(pergunta, gabarito, resposta_aluno, modo_escolhido):
     
     prompt = f"PERGUNTA: {pergunta}\nGABARITO/GUIA: {gabarito}\nRESPOSTA ALUNO: {resposta_aluno}"
 
+    texto_completo = ""
+    nota = 0
+
     try:
-        response = modelo.generate_content(prompt)
-        texto_completo = response.text
+        # Ativa o streaming
+        response = modelo.generate_content(prompt, stream=True)
         
-        # Extração Regex da Nota
+        # Loop que recebe cada pedacinho (chunk) do texto
+        for chunk in response:
+            if chunk.text:
+                texto_completo += chunk.text
+                # Escreve na tela em tempo real com um cursor simulado
+                placeholder_saida.markdown(texto_completo + "▌")
+        
+        # Remove o cursor no final
+        placeholder_saida.markdown(texto_completo)
+        
+        # Extração Regex da Nota no texto final acumulado
         match = re.search(r'\[\[NOTA:(\d+)\]\]', texto_completo)
         if match:
             nota = int(match.group(1))
-            texto_limpo = texto_completo.replace(match.group(0), "")
-        else:
-            nota = 0
-            texto_limpo = texto_completo
-            
-        return texto_limpo, nota
+            # Opcional: Limpar a tag da visualização final se quiser
+            # texto_limpo = texto_completo.replace(match.group(0), "")
+            # placeholder_saida.markdown(texto_limpo)
+        
+        return texto_completo, nota
+
     except Exception as e:
-        return f"Erro na IA: {str(e)}", 0
+        placeholder_saida.error(f"Erro na IA: {str(e)}")
+        return str(e), 0
 
 # ==================================================
 # 4. CONTROLE DE SESSÃO E LOGIN
@@ -236,12 +243,11 @@ else:
             df_alunos, _ = carregar_alunos_live()
             dados = df_alunos[df_alunos['matricula'].astype(str) == str(st.session_state['usuario_ativo'])].iloc[0]
             
-            # 1. BOTÃO DE LOGIN PROTEGIDO
             p_login = st.toggle("🔒 Exigir Senha", value=str(dados['login_protegido']).upper()=='TRUE')
             if p_login != (str(dados['login_protegido']).upper()=='TRUE'):
                 atualizar_preferencia_aluno(st.session_state['usuario_ativo'], 'login_protegido', p_login)
-                st.toast("Preferência de senha atualizada!")
-                time.sleep(1)
+                st.toast("Salvo!")
+                time.sleep(0.5) # Reduzi o tempo de espera visual
                 st.rerun()
 
             p_conf = st.toggle("🤔 Confiança", value=str(dados['pref_confianca']).upper()=='TRUE')
@@ -270,11 +276,8 @@ else:
     else:
         df_filtrado = pd.DataFrame()
         
-        # ==================================================
-        # MODO 1: BANCO DE QUESTÕES (SEM TIMER)
-        # ==================================================
+        # MODO BANCO (Sem Timer)
         if "Banco" in modo_estudo:
-            # Reseta qualquer estado de prova anterior
             st.session_state['prova_em_andamento'] = False
             st.session_state['resumo_prova'] = None
             
@@ -293,7 +296,6 @@ else:
             opt_tipo = sorted(df_questoes['tipo_input'].unique())
 
             sel_mat = st.multiselect("📚 Matéria:", opt_mat, placeholder="Todas")
-            
             with st.expander("🌪️ Mais Filtros", expanded=False):
                 c_f1, c_f2 = st.columns(2)
                 with c_f1:
@@ -303,9 +305,7 @@ else:
                     sel_ano = st.multiselect("🏛️ Fonte/Origem:", opt_ano)
                     sel_top = st.multiselect("📌 Tópico:", opt_top)
 
-            # Aplicação dos Filtros
             df_filtrado = df_questoes.copy()
-            
             def aplicar_filtro(df, coluna, selecionados):
                 if not selecionados: return df
                 if "Rigoroso" in logica_filtro:
@@ -326,16 +326,12 @@ else:
             else:
                 st.warning("Nenhuma questão encontrada.")
 
-            # LOOP BANCO (Sem Timer)
             for index, row in df_filtrado.iterrows():
                 q_id = str(row['id'])
-                
                 with st.container(border=True):
                     c1, c2 = st.columns([4, 1])
                     c1.markdown(f"**Questão {row.get('numero_questao','?')}** | {row['materia']}")
                     c1.caption(f"🆔 {q_id} | 🏛️ {row['ano']} | 🔥 {row['dificuldade']}")
-                    # (Sem Timer Visual Aqui)
-                    
                     st.markdown(f"### {row['enunciado']}")
                     
                     tipo_input = str(row.get('tipo_input', 'Multipla')).strip().lower()
@@ -350,14 +346,13 @@ else:
                         if modo:
                             if not txt_resp: st.warning("Escreva algo!")
                             else:
+                                # Cria um lugar vazio na tela para a IA escrever
+                                placeholder_feedback = st.empty()
                                 with st.spinner(f"Analisando..."):
-                                    feedback, nota_ia = corrigir_com_ia(row['enunciado'], row['gabarito'], txt_resp, modo)
-                                    st.markdown("---")
+                                    # CHAMA A NOVA FUNÇÃO DE STREAMING
+                                    feedback, nota_ia = corrigir_com_ia_stream(row['enunciado'], row['gabarito'], txt_resp, modo, placeholder_feedback)
+                                    
                                     st.markdown(f"### 📊 Nota: {nota_ia}/100")
-                                    if modo=="Banca": st.info(feedback)
-                                    elif modo=="Socrático": st.warning(feedback)
-                                    else: st.success(feedback)
-                                    # Salva com Tempo = None
                                     registrar_resposta({'matricula': st.session_state['usuario_ativo'], 'id_questao': q_id, 'acertou': "IA-Check", 'tempo': None, 'confianca': f"IA-{modo}", 'erro': feedback[:1000], 'nota_percentual': nota_ia})
                     else:
                         opcoes = {f"A) {row['alternativa_a']}": 'a', f"B) {row['alternativa_b']}": 'b', f"C) {row['alternativa_c']}": 'c', f"D) {row['alternativa_d']}": 'd'}
@@ -381,16 +376,12 @@ else:
                                 nota_auto = 100 if acertou else 0
                                 if acertou: 
                                     st.success("✅ Correto!")
-                                    if row.get('comentario'): st.info(f"💡 {row['comentario']}")
                                     registrar_resposta({'matricula': st.session_state['usuario_ativo'], 'id_questao': q_id, 'acertou': True, 'tempo': None, 'confianca': conf, 'erro': 'N/A', 'nota_percentual': nota_auto})
                                 else: 
                                     st.error(f"❌ Errado. Era {str(row['gabarito']).upper()}")
-                                    if st.session_state['prefs']['autopsia']:
-                                        st.session_state[f"erro_{q_id}"] = {'t': None, 'c': conf}
-                                    else:
-                                        registrar_resposta({'matricula': st.session_state['usuario_ativo'], 'id_questao': q_id, 'acertou': False, 'tempo': None, 'confianca': conf, 'erro': 'Não classificado', 'nota_percentual': nota_auto})
-
-                        # Autópsia (Banco)
+                                    if st.session_state['prefs']['autopsia']: st.session_state[f"erro_{q_id}"] = {'t': None, 'c': conf}
+                                    else: registrar_resposta({'matricula': st.session_state['usuario_ativo'], 'id_questao': q_id, 'acertou': False, 'tempo': None, 'confianca': conf, 'erro': 'Não classificado', 'nota_percentual': nota_auto})
+                        
                         if f"erro_{q_id}" in st.session_state:
                             st.warning("🔎 Autópsia: Por que errou?")
                             c1, c2, c3, c4 = st.columns(4)
@@ -404,33 +395,27 @@ else:
                                 registrar_resposta({'matricula': st.session_state['usuario_ativo'], 'id_questao': q_id, 'acertou': False, 'tempo': d['t'], 'confianca': d['c'], 'erro': motivo, 'nota_percentual': 0})
                                 del st.session_state[f"erro_{q_id}"]
                                 st.success("Salvo.")
-                                time.sleep(1)
+                                time.sleep(0.5)
                                 st.rerun()
 
-        # ==================================================
-        # MODO 2: PROVAS ANTIGAS (COM TIMER OPCIONAL)
-        # ==================================================
+        # MODO PROVAS (Com Timer)
         else:
             st.header("📄 Provas Antigas")
-            
             c_sel, c_tim = st.columns([3, 1])
             with c_sel:
                 opt_ano = sorted(df_questoes['ano'].unique())
                 prova_sel = st.selectbox("Selecione a Fonte/Origem:", opt_ano, index=None)
-            
             with c_tim:
                 df_alunos, _ = carregar_alunos_live()
                 dados_recente = df_alunos[df_alunos['matricula'].astype(str) == str(st.session_state['usuario_ativo'])].iloc[0]
                 valor_atual = str(dados_recente['pref_timer']).upper() == 'TRUE'
                 st.write("") 
                 p_timer = st.toggle("⏱️ Cronômetro", value=valor_atual)
-                
                 if p_timer != st.session_state['prefs']['timer']:
                     atualizar_preferencia_aluno(st.session_state['usuario_ativo'], 'pref_timer', p_timer)
                     st.session_state['prefs']['timer'] = p_timer
                     st.rerun()
 
-            # Lógica de Reset se trocar a prova
             if prova_sel != st.session_state['prova_selecionada_anterior']:
                 st.session_state['prova_em_andamento'] = False
                 st.session_state['resumo_prova'] = None
@@ -440,27 +425,18 @@ else:
             if prova_sel:
                 df_filtrado = df_questoes[df_questoes['ano'] == prova_sel].sort_values(by='numero_questao')
                 
-                # A. TIMER LIGADO + PROVA NÃO INICIADA = LOBBY
                 if st.session_state['prefs']['timer'] and not st.session_state['prova_em_andamento'] and not st.session_state['resumo_prova']:
                     st.info(f"Você selecionou **{prova_sel}** ({len(df_filtrado)} questões).")
-                    st.markdown("O cronômetro começará a contar assim que você clicar no botão abaixo.")
-                    
                     if st.button("🚀 COMEÇAR PROVA", use_container_width=True):
                         st.session_state['prova_em_andamento'] = True
-                        # RESET TOTAL DO TIMER PARA ESTA PROVA
                         agora = time.time()
-                        for idx, row in df_filtrado.iterrows():
-                            st.session_state['timers'][str(row['id'])] = agora
+                        for idx, row in df_filtrado.iterrows(): st.session_state['timers'][str(row['id'])] = agora
                         st.rerun()
 
-                # B. TELA DE RESUMO (FIM DE PROVA)
                 elif st.session_state['resumo_prova']:
                     st.markdown("<div class='resumo-box'><h2>🏁 Prova Finalizada!</h2></div>", unsafe_allow_html=True)
                     st.balloons()
-                    
                     st.write(f"Você finalizou a prova **{prova_sel}**.")
-                    st.write("Suas respostas foram registradas no banco de dados para análise de revisão.")
-                    
                     c1, c2 = st.columns(2)
                     if c1.button("🔄 Refazer Prova"):
                         st.session_state['resumo_prova'] = None
@@ -471,61 +447,38 @@ else:
                         st.session_state['prova_em_andamento'] = False
                         st.rerun()
 
-                # C. PROVA VALENDO (Timer Ligado OU Timer Desligado)
                 else:
-                    # Loop de Questões Prova
                     for index, row in df_filtrado.iterrows():
                         q_id = str(row['id'])
-                        
-                        # Timer só conta se for Prova E opção ativada
                         usar_timer = st.session_state['prefs']['timer']
-                        
-                        # Segurança: Se timer está on mas id não tem tempo (refresh de página), reseta
-                        if usar_timer and q_id not in st.session_state['timers']: 
-                            st.session_state['timers'][q_id] = time.time()
+                        if usar_timer and q_id not in st.session_state['timers']: st.session_state['timers'][q_id] = time.time()
                         
                         with st.container(border=True):
                             c1, c2 = st.columns([4, 1])
                             c1.markdown(f"**Questão {row.get('numero_questao','?')}** | {row['materia']}")
                             c1.caption(f"🆔 {q_id} | 🏛️ {row['ano']} | 🔥 {row['dificuldade']}")
-                            
                             if usar_timer:
                                 tempo_decorrido = int(time.time() - st.session_state['timers'][q_id])
                                 c2.markdown(f"⏱️ **{tempo_decorrido}s**")
-                            
                             st.markdown(f"### {row['enunciado']}")
                             
                             tipo_input = str(row.get('tipo_input', 'Multipla')).strip().lower()
-                            
                             if tipo_input == 'discursiva':
                                 txt_resp = st.text_area("Sua Resposta:", key=f"txt_{q_id}", height=150)
-                                st.caption("🤖 Solicitar Correção IA:")
                                 b1, b2, b3 = st.columns(3)
                                 modo = None
                                 if b1.button("👮 Banca", key=f"b_{q_id}"): modo = "Banca"
                                 if b2.button("🧑‍🏫 Prof", key=f"p_{q_id}"): modo = "Professor"
                                 if b3.button("🤔 Socrático", key=f"s_{q_id}"): modo = "Socrático"
-                                
                                 if modo:
                                     if not txt_resp: st.warning("Escreva algo!")
                                     else:
+                                        placeholder_feedback = st.empty()
                                         with st.spinner(f"Analisando..."):
-                                            feedback, nota_ia = corrigir_com_ia(row['enunciado'], row['gabarito'], txt_resp, modo)
-                                            st.markdown("---")
+                                            # STREAMING AQUI TAMBÉM
+                                            feedback, nota_ia = corrigir_com_ia_stream(row['enunciado'], row['gabarito'], txt_resp, modo, placeholder_feedback)
                                             st.markdown(f"### 📊 Nota: {nota_ia}/100")
-                                            if modo == "Banca": st.info(feedback)
-                                            elif modo == "Socrático": st.warning(feedback)
-                                            else: st.success(feedback)
-                                            
-                                            registrar_resposta({
-                                                'matricula': st.session_state['usuario_ativo'],
-                                                'id_questao': q_id,
-                                                'acertou': "IA-Check",
-                                                'tempo': (time.time() - st.session_state['timers'][q_id]) if usar_timer else None,
-                                                'confianca': f"IA-{modo}",
-                                                'erro': feedback[:1000],
-                                                'nota_percentual': nota_ia
-                                            })
+                                            registrar_resposta({'matricula': st.session_state['usuario_ativo'], 'id_questao': q_id, 'acertou': "IA-Check", 'tempo': (time.time() - st.session_state['timers'][q_id]) if usar_timer else None, 'confianca': f"IA-{modo}", 'erro': feedback[:1000], 'nota_percentual': nota_ia})
                             else:
                                 opcoes = {f"A) {row['alternativa_a']}": 'a', f"B) {row['alternativa_b']}": 'b', f"C) {row['alternativa_c']}": 'c', f"D) {row['alternativa_d']}": 'd'}
                                 resp = st.radio("Selecione:", list(opcoes.keys()), key=f"r_{q_id}", index=None)
@@ -540,27 +493,20 @@ else:
                                 else:
                                     st.write("---")
                                     if st.button("Responder", key=f"btn_{q_id}"): acao = True
-                                
                                 if acao:
-                                    if not resp: st.warning("Selecione uma alternativa!")
+                                    if not resp: st.warning("Selecione!")
                                     else:
                                         tempo_salvar = (time.time() - st.session_state['timers'][q_id]) if usar_timer else None
                                         letra = opcoes[resp]
                                         acertou = letra == str(row['gabarito']).lower().strip()
                                         nota_auto = 100 if acertou else 0
-                                        if acertou:
-                                            st.success(f"✅ Correto! ({letra.upper()})")
-                                            if row.get('comentario'): st.info(f"💡 {row['comentario']}")
+                                        if acertou: 
+                                            st.success("✅ Correto!")
                                             registrar_resposta({'matricula': st.session_state['usuario_ativo'], 'id_questao': q_id, 'acertou': True, 'tempo': tempo_salvar, 'confianca': conf, 'erro': 'N/A', 'nota_percentual': nota_auto})
-                                            if usar_timer: st.session_state['timers'][q_id] = time.time()
-                                        else:
+                                        else: 
                                             st.error(f"❌ Errado. Era {str(row['gabarito']).upper()}")
-                                            if st.session_state['prefs']['autopsia']:
-                                                st.session_state[f"erro_{q_id}"] = {'t': tempo_salvar, 'c': conf}
-                                            else:
-                                                registrar_resposta({'matricula': st.session_state['usuario_ativo'], 'id_questao': q_id, 'acertou': False, 'tempo': tempo_salvar, 'confianca': conf, 'erro': 'Não classificado', 'nota_percentual': nota_auto})
-                                                if usar_timer: st.session_state['timers'][q_id] = time.time()
-                                                
+                                            if st.session_state['prefs']['autopsia']: st.session_state[f"erro_{q_id}"] = {'t': tempo_salvar, 'c': conf}
+                                            else: registrar_resposta({'matricula': st.session_state['usuario_ativo'], 'id_questao': q_id, 'acertou': False, 'tempo': tempo_salvar, 'confianca': conf, 'erro': 'Não classificado', 'nota_percentual': nota_auto})
                                 if f"erro_{q_id}" in st.session_state:
                                     st.warning("🔎 Autópsia: Por que errou?")
                                     c1, c2, c3, c4 = st.columns(4)
@@ -574,10 +520,9 @@ else:
                                         registrar_resposta({'matricula': st.session_state['usuario_ativo'], 'id_questao': q_id, 'acertou': False, 'tempo': d['t'], 'confianca': d['c'], 'erro': motivo, 'nota_percentual': 0})
                                         del st.session_state[f"erro_{q_id}"]
                                         st.success("Salvo.")
-                                        time.sleep(1)
+                                        time.sleep(0.5)
                                         st.rerun()
-                    
-                    # BOTÃO TERMINAR PROVA (Aparece apenas se Timer ON e Prova Iniciada)
+
                     if st.session_state['prefs']['timer'] and st.session_state['prova_em_andamento']:
                         st.write("---")
                         if st.button("🏁 TERMINAR PROVA", type="primary", use_container_width=True):
